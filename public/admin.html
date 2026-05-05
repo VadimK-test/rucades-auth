@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Админ-панель</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; }
+    table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    td, th { border: 1px solid #ccc; padding: 6px 10px; }
+    th { background: #eee; }
+    tr.pending  { background: #fff8c4; }
+    tr.approved { background: #d8f5d8; }
+    tr.rejected { background: #f8d0d0; }
+    button { margin: 0 2px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Управление сертификатами</h1>
+  <table id="tbl">
+    <thead>
+      <tr>
+        <th>ID</th><th>Subject</th><th>Issuer</th>
+        <th>Срок</th><th>Статус</th><th>Действия</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <script>
+    async function load() {
+      const r = await fetch('/api/admin/certificates');
+      if (!r.ok) { document.body.innerHTML = '<h2>Нет доступа</h2>'; return; }
+      const data = await r.json();
+      const tb = document.querySelector('#tbl tbody');
+      tb.innerHTML = '';
+      data.forEach(c => {
+        const tr = document.createElement('tr');
+        tr.className = c.status;
+        tr.innerHTML = `
+          <td>${c.id}</td>
+          <td>${c.subject}${c.is_admin ? ' 👑' : ''}</td>
+          <td>${c.issuer}</td>
+          <td>${new Date(c.valid_to).toLocaleDateString()}</td>
+          <td>${c.status}</td>
+          <td>
+            ${c.status === 'pending' ? `
+              <button onclick="act(${c.id},'approve')">✅</button>
+              <button onclick="act(${c.id},'reject')">❌</button>` : ''}
+          </td>`;
+        tb.appendChild(tr);
+      });
+    }
+    async function act(id, a) {
+      await fetch(`/api/admin/certificates/${id}/${a}`, { method: 'POST' });
+      load();
+    }
+    load();
+  </script>
+</body>
+</html>
