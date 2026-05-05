@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Вход по ЭП (КриптоПро)</title>
+  <script src="https://unpkg.com/crypto-pro@0.6.0/dist/crypto-pro.min.js"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 780px; margin: 2em auto; padding: 0 1em; }
+    select, button { padding: .6em 1em; font-size: 1em; }
+    #log { background: #f4f4f4; padding: 1em; white-space: pre-wrap; min-height: 80px; }
+    .err { color: #c00; } .ok { color: #080; }
+  </style>
+</head>
+<body>
+  <h1>🔐 Вход по ЭП (КриптоПро + Рутокен)</h1>
+  <p>
+    <label>Сертификат:
+      <select id="cert" style="min-width: 400px"></select>
+    </label>
+  </p>
+  <button id="btn">Войти</button>
+  <h3>Лог:</h3>
+  <div id="log"></div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const log = (m, c='') => {
+      const d = document.createElement('div');
+      if (c) d.className = c;
+      d.textContent = m;
+      $('log').appendChild(d);
+    };
+
+    // crypto-pro — обёртка над cadesplugin_api
+    const { getUserCertificates, createDetachedSignature } = window.cryptoPro;
+
+    async function loadCerts() {
+      try {
+        const certs = await getUserCertificates();
+        if (!certs.length) { log('Нет сертификатов', 'err'); return; }
+        certs.forEach(c => {
+          const o = document.createElement('option');
+          o.value = c.thumbprint;
+          o.textContent = `${c.name} (до ${c.validTo})`;
+          $('cert').appendChild(o);
+        });
+        log(`Найдено сертификатов: ${certs.length}`, 'ok');
+      } catch (e) {
+        log('Ошибка загрузки сертификатов: ' + (e.message || e), 'err');
+      }
+    }
+
+    async function login() {
+      try {
+        const thumbprint = $('cert').value;
+        if (!thumbprint) throw new Error('Выберите сертификат');
+
+        // 1. Challenge
+        const ch = await (await fetch('/api/auth/challenge')).json();
+        log(`Challenge: ${ch.nonce.substring(0,16)}…`);
+
+        // 2. Создание CAdES-BES отсоединённой подписи
+        // crypto-pro принимает данные в base64 по умолчанию
+        const nonceBase64 = btoa(ch.nonce.match(/.{2}/g).map(b => String.fromCharCode(parseInt(b,16))).join(''));
+        const signature = await createDetachedSignature(thumbprint, nonceBase64);
+        log('Данные подписаны', 'ok');
+
+        // 3. Получаем сертификат подписанта
+        const certs = await getUserCertificates();
+        const cert = certs.find(c => c.thumbprint === thumbprint);
+        const certPem = `-----BEGIN CERTIFICATE-----\n${cert.certificateBin.match(/.{1,64}/g).join('\n')}\n-----END CERTIFICATE-----`;
+
+        // 4. Отправка на сервер
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            challengeId: ch.id,
+            signatureCms: signature,
+            certificatePem: certPem
+          })
+        });
+        const res = await r.json();
+
+        if (res.status === 'approved') {
+          log('✅ Доступ разрешён', 'ok');
+          setTimeout(() => location.href = '/app.html', 800);
+        } else if (res.status === 'pending') {
+          log('⏳ Сертификат отправлен администратору', 'ok');
+          alert('Ожидайте подтверждения администратором');
+        } else {
+          log('❌ ' + (res.error || res.message), 'err');
+        }
+      } catch (e) {
+        log('Ошибка: ' + (e.message || e), 'err');
+      }
+    }
+
+    $('btn').onclick = login;
+    loadCerts();
+  </script>
+</body>
+</html>
